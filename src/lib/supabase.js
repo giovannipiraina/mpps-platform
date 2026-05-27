@@ -1,12 +1,21 @@
 import { createClient } from '@supabase/supabase-js'
 
-const ANTHROPIC_KEY = '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'
-const AI_HEADERS = { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }
-
 export const supabase = createClient(
-  'https://nirsecbemmdilxxqcobt.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5pcnNlY2JlbW1kaWx4eHFjb2J0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MjU2OTYsImV4cCI6MjA5NTQwMTY5Nn0.uyDaqYRD0PlEzYxA_aEUv-8wqtLhRsegz5Cn-LPUvNc'
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
 )
+
+async function callClaude(body) {
+  const res = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  const data = await res.json()
+  const raw = data.content.map(b => b.text || '').join('')
+  return raw.replace(/```json|```/g, '').trim()
+}
 
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
@@ -145,49 +154,31 @@ export async function getSubmissionsForTeacher(teacherId) {
 }
 
 export async function extractQuestionsFromPDF(base64Data) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: AI_HEADERS,
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514', max_tokens: 4000,
-      messages: [{ role: 'user', content: [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } },
-        { type: 'text', text: 'Extract ALL questions. Return ONLY valid JSON: {"title":"","subject":"","year_level":"","curriculum_code":"","questions":[{"id":1,"type":"mcq","question":"","options":[],"answer":"","explanation":""}]}. Types: mcq,short,truefalse,fill,fill_multi. Infer answers if missing.' }
-      ]}]
-    })
+  const raw = await callClaude({
+    model: 'claude-haiku-4-5-20251001', max_tokens: 4000,
+    messages: [{ role: 'user', content: [
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } },
+      { type: 'text', text: 'Extract ALL questions. Return ONLY valid JSON: {"title":"","subject":"","year_level":"","curriculum_code":"","questions":[{"id":1,"type":"mcq","question":"","options":[],"answer":"","explanation":""}]}. Types: mcq,short,truefalse,fill,fill_multi. Infer answers if missing.' }
+    ]}]
   })
-  const data = await res.json()
-  const raw = data.content.map(b => b.text || '').join('')
-  return JSON.parse(raw.replace(/```json|```/g, '').trim())
+  return JSON.parse(raw)
 }
 
 export async function extractQuestionsFromText(text) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: AI_HEADERS,
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514', max_tokens: 4000,
-      messages: [{ role: 'user', content: `Extract ALL questions. Return ONLY JSON: {"title":"","subject":"","year_level":"","curriculum_code":"","questions":[{"id":1,"type":"mcq","question":"","options":[],"answer":"","explanation":""}]}. Types: mcq,short,truefalse,fill,fill_multi.\n\n${text}` }]
-    })
+  const raw = await callClaude({
+    model: 'claude-haiku-4-5-20251001', max_tokens: 4000,
+    messages: [{ role: 'user', content: `Extract ALL questions. Return ONLY JSON: {"title":"","subject":"","year_level":"","curriculum_code":"","questions":[{"id":1,"type":"mcq","question":"","options":[],"answer":"","explanation":""}]}. Types: mcq,short,truefalse,fill,fill_multi.\n\n${text}` }]
   })
-  const data = await res.json()
-  const raw = data.content.map(b => b.text || '').join('')
-  return JSON.parse(raw.replace(/```json|```/g, '').trim())
+  return JSON.parse(raw)
 }
 
 export async function gradeShortAnswer(question, studentAns, expectedAnswer, keywords) {
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: AI_HEADERS,
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', max_tokens: 300,
-        messages: [{ role: 'user', content: `Mark this answer. Return ONLY JSON.\nQuestion: ${question}\nExpected: ${expectedAnswer}\nKeywords: ${(keywords||[]).join(', ')}\nStudent: "${studentAns}"\nReturn: {"correct":true/false,"score":0-1,"feedback":"1-2 encouraging sentences"}` }]
-      })
+    const raw = await callClaude({
+      model: 'claude-haiku-4-5-20251001', max_tokens: 300,
+      messages: [{ role: 'user', content: `Mark this answer. Return ONLY JSON.\nQuestion: ${question}\nExpected: ${expectedAnswer}\nKeywords: ${(keywords||[]).join(', ')}\nStudent: "${studentAns}"\nReturn: {"correct":true/false,"score":0-1,"feedback":"1-2 encouraging sentences"}` }]
     })
-    const data = await res.json()
-    const raw = data.content.map(b => b.text || '').join('')
-    return JSON.parse(raw.replace(/```json|```/g, '').trim())
+    return JSON.parse(raw)
   } catch {
     const hit = (keywords||[]).some(k => studentAns.toLowerCase().includes(k.toLowerCase()))
     return { correct: hit, score: hit ? 0.7 : 0, feedback: hit ? 'Good thinking!' : 'Have another look.' }
